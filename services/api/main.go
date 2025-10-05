@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"helios/api/internal/platform"
+	"helios/pkg/database"
 	"helios/pkg/logger"
 
 	"github.com/nats-io/nats.go"
@@ -35,7 +36,26 @@ func main() {
 	defer natsConn.Close()
 	log.Info().Msgf("Successfully connected to NATS at %s", natsConn.ConnectedUrl())
 
+	// Initialize database connection
+	dbCfg := database.DBConfig{
+		User:         "user",
+		Password:     "password",
+		Host:         "localhost",
+		Port:         5432,
+		DBName:       "helios",
+		SSLMode:      "disable",
+		MaxOpenConns: 25,
+		MaxIdleConns: 25,
+		MaxIdleTime:  15 * time.Minute,
+	}
+	db, err := database.NewDB(dbCfg)
+	if err != nil {
+		log.Fatal().Err(err).Msg("FATAL: Could not connect to the database")
+	}
+	defer db.Close()
+	log.Info().Msg("Successfully connected to the database")
+
 	// --- Create and Run Application ---
-	app := platform.NewApp(log, natsConn)
+	app := platform.NewApp(log, natsConn, db)
 	app.Run()
 }

@@ -4,6 +4,7 @@ package platform
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"os"
 	"os/signal"
@@ -22,14 +23,16 @@ type App struct {
 	Logger zerolog.Logger
 	Router *chi.Mux
 	NATS   *nats.Conn
+	DB     *sql.DB
 }
 
 // NewApp creates and configures a new application instance.
-func NewApp(logger zerolog.Logger, natsConn *nats.Conn) *App {
+func NewApp(logger zerolog.Logger, natsConn *nats.Conn, db *sql.DB) *App {
 	app := &App{
 		Logger: logger,
 		Router: chi.NewRouter(),
 		NATS:   natsConn,
+		DB:     db,
 	}
 
 	// Register routes
