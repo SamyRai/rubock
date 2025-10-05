@@ -5,8 +5,10 @@ import (
 	"testing"
 
 	"helios/pkg/events"
+	"helios/pkg/testutil"
 	"github.com/nats-io/nats.go"
-	"github.com/rs/zerolog"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // --- Mocks ---
@@ -32,7 +34,7 @@ func (m *MockNatsPublisher) Publish(subject string, data []byte) error {
 
 func TestHandleDeploymentRequest(t *testing.T) {
 	// --- Setup ---
-	testLogger := zerolog.Nop()
+	testLogger := testutil.NewTestLogger()
 	mockNATS := &MockNatsPublisher{}
 	worker := NewWorker(mockNATS, testLogger)
 
@@ -43,9 +45,7 @@ func TestHandleDeploymentRequest(t *testing.T) {
 		GitBranch:     "develop",
 	}
 	requestData, err := json.Marshal(request)
-	if err != nil {
-		t.Fatalf("Failed to marshal request: %v", err)
-	}
+	require.NoError(t, err, "Failed to marshal request")
 
 	// Create a NATS message
 	msg := &nats.Msg{
@@ -59,31 +59,17 @@ func TestHandleDeploymentRequest(t *testing.T) {
 	// --- Assert ---
 
 	// 1. Check that a message was published
-	if mockNATS.PublishedSubject == "" {
-		t.Fatal("worker did not publish a NATS message")
-	}
+	assert.NotEmpty(t, mockNATS.PublishedSubject, "worker did not publish a NATS message")
 
 	// 2. Check that it was published to the correct subject
-	expectedSubject := events.SubjectBuildSucceeded
-	if mockNATS.PublishedSubject != expectedSubject {
-		t.Errorf("worker published to wrong NATS subject: got %s want %s", mockNATS.PublishedSubject, expectedSubject)
-	}
+	assert.Equal(t, events.SubjectBuildSucceeded, mockNATS.PublishedSubject, "worker published to wrong NATS subject")
 
 	// 3. Check the payload of the published message
 	var publishedEvent events.BuildSucceeded
-	if err := json.Unmarshal(mockNATS.PublishedData, &publishedEvent); err != nil {
-		t.Fatalf("Could not unmarshal published NATS message payload: %v", err)
-	}
+	err = json.Unmarshal(mockNATS.PublishedData, &publishedEvent)
+	require.NoError(t, err, "Could not unmarshal published NATS message payload")
 
-	if publishedEvent.AppID != request.AppID {
-		t.Errorf("NATS event has wrong AppID: got %s want %s", publishedEvent.AppID, request.AppID)
-	}
-
-	if publishedEvent.GitCommitSHA == "" {
-		t.Error("NATS event is missing GitCommitSHA")
-	}
-
-	if publishedEvent.ImageURI == "" {
-		t.Error("NATS event is missing ImageURI")
-	}
+	assert.Equal(t, request.AppID, publishedEvent.AppID, "NATS event has wrong AppID")
+	assert.NotEmpty(t, publishedEvent.GitCommitSHA, "NATS event is missing GitCommitSHA")
+	assert.NotEmpty(t, publishedEvent.ImageURI, "NATS event is missing ImageURI")
 }

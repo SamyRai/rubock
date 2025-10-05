@@ -5,13 +5,14 @@ import (
 	"testing"
 
 	"helios/pkg/events"
+	"helios/pkg/testutil"
 	"github.com/nats-io/nats.go"
-	"github.com/rs/zerolog"
+	"github.com/stretchr/testify/require"
 )
 
 func TestHandleBuildSucceeded(t *testing.T) {
 	// --- Setup ---
-	testLogger := zerolog.Nop()
+	testLogger := testutil.NewTestLogger()
 	worker := NewWorker(testLogger)
 
 	// Create a sample build succeeded event
@@ -21,9 +22,7 @@ func TestHandleBuildSucceeded(t *testing.T) {
 		GitCommitSHA: "a1b2c3d4",
 	}
 	eventData, err := json.Marshal(event)
-	if err != nil {
-		t.Fatalf("Failed to marshal event: %v", err)
-	}
+	require.NoError(t, err, "Failed to marshal event")
 
 	// Create a NATS message
 	msg := &nats.Msg{
@@ -34,5 +33,7 @@ func TestHandleBuildSucceeded(t *testing.T) {
 	// --- Act & Assert ---
 	// The test will pass if this function executes without panicking.
 	// In a real-world scenario, we might check for logs or other side effects.
-	worker.HandleBuildSucceeded(msg)
+	require.NotPanics(t, func() {
+		worker.HandleBuildSucceeded(msg)
+	}, "HandleBuildSucceeded should not panic")
 }

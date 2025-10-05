@@ -8,7 +8,9 @@ import (
 	"testing"
 
 	"helios/pkg/events"
-	"github.com/rs/zerolog"
+	"helios/pkg/testutil"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // --- Mocks ---
@@ -34,54 +36,44 @@ func (m *MockNatsPublisher) Publish(subject string, data []byte) error {
 // --- Tests ---
 
 func TestCreateProjectHandler(t *testing.T) {
-	// Use a disabled logger for tests to avoid noisy output.
-	testLogger := zerolog.Nop()
-	// Create a new set of handlers with a nil NATS publisher since this handler
-	// doesn't use it.
+	// Use the test logger from the shared package.
+	testLogger := testutil.NewTestLogger()
 	handlers := NewAPIHandlers(nil, testLogger)
 
 	req, err := http.NewRequest("POST", "/projects", nil)
-	if err != nil {
-		t.Fatalf("Could not create request: %v", err)
-	}
+	require.NoError(t, err, "Could not create request")
 
 	rr := httptest.NewRecorder()
 	handler := http.HandlerFunc(handlers.CreateProjectHandler)
 	handler.ServeHTTP(rr, req)
 
 	// Check the status code
-	if status := rr.Code; status != http.StatusCreated {
-		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusCreated)
-	}
+	assert.Equal(t, http.StatusCreated, rr.Code, "handler returned wrong status code")
 
 	// Check the response body
 	var response map[string]string
-	if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
-		t.Fatalf("Could not parse response body: %v", err)
-	}
+	err = json.Unmarshal(rr.Body.Bytes(), &response)
+	require.NoError(t, err, "Could not parse response body")
 
-	if id, ok := response["id"]; !ok || id != "proj_12345" {
-		t.Errorf("handler returned unexpected body: got %v", rr.Body.String())
-	}
+	assert.Equal(t, "proj_12345", response["id"], "handler returned unexpected body")
 }
 
 func TestCreateApplicationHandler(t *testing.T) {
-	testLogger := zerolog.Nop()
+	testLogger := testutil.NewTestLogger()
 	mockNATS := &MockNatsPublisher{}
 	handlers := NewAPIHandlers(mockNATS, testLogger)
 
 	// Create the request body
 	reqBody := map[string]string{
-		"name":            "my-app",
-		"git_repository":  "https://github.com/example/my-app.git",
-		"git_branch":      "main",
+		"name":           "my-app",
+		"git_repository": "https://github.com/example/my-app.git",
+		"git_branch":     "main",
 	}
-	body, _ := json.Marshal(reqBody)
+	body, err := json.Marshal(reqBody)
+	require.NoError(t, err)
 
 	req, err := http.NewRequest("POST", "/applications", bytes.NewBuffer(body))
-	if err != nil {
-		t.Fatalf("Could not create request: %v", err)
-	}
+	require.NoError(t, err, "Could not create request")
 	req.Header.Set("Content-Type", "application/json")
 
 	rr := httptest.NewRecorder()
@@ -89,29 +81,17 @@ func TestCreateApplicationHandler(t *testing.T) {
 	handler.ServeHTTP(rr, req)
 
 	// Check the status code
-	if status := rr.Code; status != http.StatusAccepted {
-		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusAccepted)
-	}
+	assert.Equal(t, http.StatusAccepted, rr.Code, "handler returned wrong status code")
 
 	// Check that a message was published to NATS
-	if mockNATS.PublishedSubject == "" {
-		t.Errorf("handler did not publish a NATS message")
-	}
-
-	if mockNATS.PublishedSubject != events.SubjectDeploymentRequested {
-		t.Errorf("handler published to wrong NATS subject: got %s want %s", mockNATS.PublishedSubject, events.SubjectDeploymentRequested)
-	}
+	assert.NotEmpty(t, mockNATS.PublishedSubject, "handler did not publish a NATS message")
+	assert.Equal(t, events.SubjectDeploymentRequested, mockNATS.PublishedSubject, "handler published to wrong NATS subject")
 
 	// Check the NATS message payload
 	var event events.DeploymentRequest
-	if err := json.Unmarshal(mockNATS.PublishedData, &event); err != nil {
-		t.Fatalf("Could not unmarshal NATS message payload: %v", err)
-	}
+	err = json.Unmarshal(mockNATS.PublishedData, &event)
+	require.NoError(t, err, "Could not unmarshal NATS message payload")
 
-	if event.AppID != "app_67890" {
-		t.Errorf("NATS event has wrong AppID: got %s want %s", event.AppID, "app_67890")
-	}
-	if event.GitRepository != reqBody["git_repository"] {
-		t.Errorf("NATS event has wrong GitRepository: got %s want %s", event.GitRepository, reqBody["git_repository"])
-	}
+	assert.Equal(t, "app_67890", event.AppID, "NATS event has wrong AppID")
+	assert.Equal(t, reqBody["git_repository"], event.GitRepository, "NATS event has wrong GitRepository")
 }
