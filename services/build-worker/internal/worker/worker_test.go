@@ -2,11 +2,14 @@ package worker
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"helios/pkg/events"
+	"helios/pkg/testutil"
 	"github.com/nats-io/nats.go"
-	"github.com/rs/zerolog"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // --- Mocks ---
@@ -18,72 +21,81 @@ type MockNatsPublisher struct {
 	PublishError     error
 }
 
-// Publish records the subject and data it was called with.
+// Publish records the subject and data it was called with, then returns any configured error.
 func (m *MockNatsPublisher) Publish(subject string, data []byte) error {
-	if m.PublishError != nil {
-		return m.PublishError
-	}
 	m.PublishedSubject = subject
 	m.PublishedData = data
-	return nil
+	return m.PublishError
 }
 
 // --- Tests ---
 
 func TestHandleDeploymentRequest(t *testing.T) {
-	// --- Setup ---
-	testLogger := zerolog.Nop()
-	mockNATS := &MockNatsPublisher{}
-	worker := NewWorker(mockNATS, testLogger)
-
-	// Create a sample deployment request event
-	request := events.DeploymentRequest{
+	// Setup a valid deployment request for reuse
+	validRequest := events.DeploymentRequest{
 		AppID:         "app-123",
 		GitRepository: "https://github.com/example/app.git",
 		GitBranch:     "develop",
 	}
-	requestData, err := json.Marshal(request)
-	if err != nil {
-		t.Fatalf("Failed to marshal request: %v", err)
+	validRequestData, err := json.Marshal(validRequest)
+	require.NoError(t, err, "Setup failed: could not marshal valid request")
+
+	testCases := []struct {
+		name              string
+		natsMsgData       []byte
+		mockNatsError     error
+		expectNatsPublish bool
+	}{
+		{
+			name:              "Successful Case",
+			natsMsgData:       validRequestData,
+			mockNatsError:     nil,
+			expectNatsPublish: true,
+		},
+		{
+			name:              "Failure Case - Invalid JSON",
+			natsMsgData:       []byte(`{"app_id": "app-123",`),
+			mockNatsError:     nil,
+			expectNatsPublish: false,
+		},
+		{
+			name:              "Failure Case - NATS Publish Error",
+			natsMsgData:       validRequestData,
+			mockNatsError:     errors.New("NATS is down"),
+			expectNatsPublish: true, // It will still attempt to publish
+		},
 	}
 
-	// Create a NATS message
-	msg := &nats.Msg{
-		Subject: events.SubjectDeploymentRequested,
-		Data:    requestData,
-	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Setup
+			testLogger := testutil.NewTestLogger()
+			mockNATS := &MockNatsPublisher{PublishError: tc.mockNatsError}
+			worker := NewWorker(mockNATS, testLogger)
 
-	// --- Act ---
-	worker.HandleDeploymentRequest(msg)
+			msg := &nats.Msg{
+				Subject: events.SubjectDeploymentRequested,
+				Data:    tc.natsMsgData,
+			}
 
-	// --- Assert ---
+			// Execute
+			worker.HandleDeploymentRequest(msg)
 
-	// 1. Check that a message was published
-	if mockNATS.PublishedSubject == "" {
-		t.Fatal("worker did not publish a NATS message")
-	}
-
-	// 2. Check that it was published to the correct subject
-	expectedSubject := events.SubjectBuildSucceeded
-	if mockNATS.PublishedSubject != expectedSubject {
-		t.Errorf("worker published to wrong NATS subject: got %s want %s", mockNATS.PublishedSubject, expectedSubject)
-	}
-
-	// 3. Check the payload of the published message
-	var publishedEvent events.BuildSucceeded
-	if err := json.Unmarshal(mockNATS.PublishedData, &publishedEvent); err != nil {
-		t.Fatalf("Could not unmarshal published NATS message payload: %v", err)
-	}
-
-	if publishedEvent.AppID != request.AppID {
-		t.Errorf("NATS event has wrong AppID: got %s want %s", publishedEvent.AppID, request.AppID)
-	}
-
-	if publishedEvent.GitCommitSHA == "" {
-		t.Error("NATS event is missing GitCommitSHA")
-	}
-
-	if publishedEvent.ImageURI == "" {
-		t.Error("NATS event is missing ImageURI")
+			// Assert
+			if tc.expectNatsPublish {
+				assert.NotEmpty(t, mockNATS.PublishedSubject, "worker should have attempted to publish a NATS message")
+				if tc.mockNatsError == nil {
+					assert.Equal(t, events.SubjectBuildSucceeded, mockNATS.PublishedSubject, "worker published to wrong NATS subject")
+					var publishedEvent events.BuildSucceeded
+					err := json.Unmarshal(mockNATS.PublishedData, &publishedEvent)
+					require.NoError(t, err, "Could not unmarshal published NATS message payload")
+					assert.Equal(t, validRequest.AppID, publishedEvent.AppID, "NATS event has wrong AppID")
+					assert.NotEmpty(t, publishedEvent.GitCommitSHA, "NATS event is missing GitCommitSHA")
+					assert.NotEmpty(t, publishedEvent.ImageURI, "NATS event is missing ImageURI")
+				}
+			} else {
+				assert.Empty(t, mockNATS.PublishedSubject, "worker should not have published a NATS message")
+			}
+		})
 	}
 }
