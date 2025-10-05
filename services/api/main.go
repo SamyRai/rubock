@@ -1,43 +1,41 @@
 package main
 
 import (
-	"log"
-	"net/http"
 	"os"
+	"time"
 
-	"helios/api/internal/handlers"
+	"helios/api/internal/platform"
+	"helios/pkg/logger"
+
 	"github.com/nats-io/nats.go"
 )
 
 func main() {
-	// --- Connect to NATS ---
+	// --- Initialize Dependencies ---
+	log := logger.New()
+
 	natsURL := os.Getenv("NATS_URL")
 	if natsURL == "" {
-		natsURL = nats.DefaultURL // "nats://127.0.0.1:4222"
+		natsURL = nats.DefaultURL
 	}
 
-	natsConn, err := nats.Connect(natsURL)
+	var natsConn *nats.Conn
+	var err error
+	for i := 0; i < 5; i++ {
+		natsConn, err = nats.Connect(natsURL)
+		if err == nil {
+			break
+		}
+		log.Warn().Err(err).Msgf("Failed to connect to NATS, retrying in %d seconds...", i+1)
+		time.Sleep(time.Duration(i+1) * time.Second)
+	}
 	if err != nil {
-		log.Fatalf("FATAL: Failed to connect to NATS at %s: %v", natsURL, err)
+		log.Fatal().Err(err).Msgf("FATAL: Could not connect to NATS at %s", natsURL)
 	}
 	defer natsConn.Close()
-	log.Printf("Successfully connected to NATS at %s", natsConn.ConnectedUrl())
+	log.Info().Msgf("Successfully connected to NATS at %s", natsConn.ConnectedUrl())
 
-	// --- Setup HTTP Server ---
-	// The nats.Conn satisfies the NatsPublisher interface, so we can pass it directly.
-	apiHandlers := handlers.NewAPIHandlers(natsConn)
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/projects", apiHandlers.CreateProjectHandler)
-	mux.HandleFunc("/applications", apiHandlers.CreateApplicationHandler)
-
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
-
-	log.Printf("Starting API server on port %s...", port)
-	if err := http.ListenAndServe(":"+port, mux); err != nil {
-		log.Fatalf("FATAL: Could not start server: %v", err)
-	}
+	// --- Create and Run Application ---
+	app := platform.NewApp(log, natsConn)
+	app.Run()
 }

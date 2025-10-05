@@ -3,11 +3,11 @@ package worker
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"time"
 
 	"helios/pkg/events"
 	"github.com/nats-io/nats.go"
+	"github.com/rs/zerolog"
 )
 
 // NatsPublisher defines the interface for publishing messages to NATS.
@@ -17,28 +17,35 @@ type NatsPublisher interface {
 
 // Worker holds dependencies for the message handler.
 type Worker struct {
-	NATS NatsPublisher
+	NATS   NatsPublisher
+	Logger zerolog.Logger
 }
 
 // NewWorker creates a new Worker.
-func NewWorker(nats NatsPublisher) *Worker {
-	return &Worker{NATS: nats}
+func NewWorker(nats NatsPublisher, logger zerolog.Logger) *Worker {
+	return &Worker{
+		NATS:   nats,
+		Logger: logger,
+	}
 }
 
 // HandleDeploymentRequest processes incoming deployment request events.
 func (w *Worker) HandleDeploymentRequest(m *nats.Msg) {
 	var request events.DeploymentRequest
 	if err := json.Unmarshal(m.Data, &request); err != nil {
-		log.Printf("ERROR: Could not unmarshal deployment request: %v", err)
+		w.Logger.Error().Err(err).Msg("Could not unmarshal deployment request")
 		return
 	}
 
-	log.Printf("INFO: Received deployment request for App ID: %s, Repo: %s", request.AppID, request.GitRepository)
+	w.Logger.Info().
+		Str("app_id", request.AppID).
+		Str("repo", request.GitRepository).
+		Msg("Received deployment request")
 
 	// Simulate the build process
-	log.Printf("INFO: Simulating build process for %s...", request.AppID)
+	w.Logger.Info().Str("app_id", request.AppID).Msg("Simulating build process...")
 	time.Sleep(1 * time.Second) // Reduced for faster tests
-	log.Printf("INFO: Build simulation complete for %s.", request.AppID)
+	w.Logger.Info().Str("app_id", request.AppID).Msg("Build simulation complete")
 
 	// Publish Build Succeeded Event
 	commitSHA := "a1b2c3d4e5f6" // Placeholder
@@ -52,15 +59,18 @@ func (w *Worker) HandleDeploymentRequest(m *nats.Msg) {
 
 	eventData, err := json.Marshal(event)
 	if err != nil {
-		log.Printf("ERROR: could not marshal build succeeded event: %v", err)
+		w.Logger.Error().Err(err).Str("app_id", request.AppID).Msg("Could not marshal build succeeded event")
 		return
 	}
 
 	subject := events.SubjectBuildSucceeded
 	if err := w.NATS.Publish(subject, eventData); err != nil {
-		log.Printf("ERROR: failed to publish to NATS subject '%s': %v", subject, err)
+		w.Logger.Error().Err(err).Str("subject", subject).Str("app_id", request.AppID).Msg("Failed to publish to NATS")
 		return
 	}
 
-	log.Printf("SUCCESS: Published event to NATS subject '%s' for App ID %s", subject, request.AppID)
+	w.Logger.Info().
+		Str("subject", subject).
+		Str("app_id", request.AppID).
+		Msg("Successfully published event to NATS")
 }

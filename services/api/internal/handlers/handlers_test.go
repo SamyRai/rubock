@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"helios/pkg/events"
+	"github.com/rs/zerolog"
 )
 
 // --- Mocks ---
@@ -33,9 +34,11 @@ func (m *MockNatsPublisher) Publish(subject string, data []byte) error {
 // --- Tests ---
 
 func TestCreateProjectHandler(t *testing.T) {
+	// Use a disabled logger for tests to avoid noisy output.
+	testLogger := zerolog.Nop()
 	// Create a new set of handlers with a nil NATS publisher since this handler
 	// doesn't use it.
-	handlers := NewAPIHandlers(nil)
+	handlers := NewAPIHandlers(nil, testLogger)
 
 	req, err := http.NewRequest("POST", "/projects", nil)
 	if err != nil {
@@ -63,8 +66,9 @@ func TestCreateProjectHandler(t *testing.T) {
 }
 
 func TestCreateApplicationHandler(t *testing.T) {
+	testLogger := zerolog.Nop()
 	mockNATS := &MockNatsPublisher{}
-	handlers := NewAPIHandlers(mockNATS)
+	handlers := NewAPIHandlers(mockNATS, testLogger)
 
 	// Create the request body
 	reqBody := map[string]string{

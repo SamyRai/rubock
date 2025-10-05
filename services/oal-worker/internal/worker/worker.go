@@ -2,38 +2,44 @@ package worker
 
 import (
 	"encoding/json"
-	"log"
 	"time"
 
 	"helios/pkg/events"
 	"github.com/nats-io/nats.go"
+	"github.com/rs/zerolog"
 )
 
 // Worker holds dependencies for the message handler.
-// It doesn't have any dependencies for now, but is kept for consistency.
-type Worker struct{}
+type Worker struct {
+	Logger zerolog.Logger
+}
 
 // NewWorker creates a new Worker.
-func NewWorker() *Worker {
-	return &Worker{}
+func NewWorker(logger zerolog.Logger) *Worker {
+	return &Worker{Logger: logger}
 }
 
 // HandleBuildSucceeded processes incoming build succeeded events.
 func (w *Worker) HandleBuildSucceeded(m *nats.Msg) {
 	var event events.BuildSucceeded
 	if err := json.Unmarshal(m.Data, &event); err != nil {
-		log.Printf("ERROR: Could not unmarshal build succeeded event: %v", err)
+		w.Logger.Error().Err(err).Msg("Could not unmarshal build succeeded event")
 		return
 	}
 
-	log.Printf("INFO: Received build succeeded event for App ID: %s, Image: %s", event.AppID, event.ImageURI)
+	w.Logger.Info().
+		Str("app_id", event.AppID).
+		Str("image_uri", event.ImageURI).
+		Msg("Received build succeeded event")
 
 	// Simulate the deployment process
-	log.Printf("INFO: Simulating deployment of image %s for App ID %s...", event.ImageURI, event.AppID)
-	log.Printf("INFO: > docker-compose up -d (simulation)")
+	w.Logger.Info().
+		Str("app_id", event.AppID).
+		Str("image_uri", event.ImageURI).
+		Msg("Simulating deployment...")
 	time.Sleep(1 * time.Second) // Reduced for faster tests
-	log.Printf("INFO: Deployment simulation complete for %s.", event.AppID)
+	w.Logger.Info().Str("app_id", event.AppID).Msg("Deployment simulation complete")
 
 	// In a real implementation, we would publish a "deployment.succeeded" event here.
-	log.Printf("SUCCESS: End of workflow for App ID %s.", event.AppID)
+	w.Logger.Info().Str("app_id", event.AppID).Msg("End of workflow")
 }

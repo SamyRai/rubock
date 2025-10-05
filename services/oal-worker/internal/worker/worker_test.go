@@ -6,11 +6,13 @@ import (
 
 	"helios/pkg/events"
 	"github.com/nats-io/nats.go"
+	"github.com/rs/zerolog"
 )
 
 func TestHandleBuildSucceeded(t *testing.T) {
 	// --- Setup ---
-	worker := NewWorker()
+	testLogger := zerolog.Nop()
+	worker := NewWorker(testLogger)
 
 	// Create a sample build succeeded event
 	event := events.BuildSucceeded{

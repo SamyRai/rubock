@@ -1,42 +1,41 @@
 package main
 
 import (
-	"log"
 	"os"
+	"time"
 
-	"helios/build-worker/internal/worker"
-	"helios/pkg/events"
+	"helios/build-worker/internal/platform"
+	"helios/pkg/logger"
 
 	"github.com/nats-io/nats.go"
 )
 
 func main() {
-	// --- Connect to NATS ---
+	// --- Initialize Dependencies ---
+	log := logger.New()
+
 	natsURL := os.Getenv("NATS_URL")
 	if natsURL == "" {
 		natsURL = nats.DefaultURL
 	}
 
-	nc, err := nats.Connect(natsURL)
-	if err != nil {
-		log.Fatalf("FATAL: Failed to connect to NATS at %s: %v", natsURL, err)
+	var natsConn *nats.Conn
+	var err error
+	for i := 0; i < 5; i++ {
+		natsConn, err = nats.Connect(natsURL)
+		if err == nil {
+			break
+		}
+		log.Warn().Err(err).Msgf("Failed to connect to NATS, retrying in %d seconds...", i+1)
+		time.Sleep(time.Duration(i+1) * time.Second)
 	}
-	defer nc.Close()
-	log.Printf("Successfully connected to NATS at %s", nc.ConnectedUrl())
-
-	// --- Setup Worker ---
-	// The nats.Conn satisfies the NatsPublisher interface.
-	w := worker.NewWorker(nc)
-
-	// --- Subscribe to Deployment Requests ---
-	subject := events.SubjectDeploymentRequested
-	_, err = nc.QueueSubscribe(subject, "build-workers", w.HandleDeploymentRequest)
 	if err != nil {
-		log.Fatalf("FATAL: Could not subscribe to NATS subject '%s': %v", subject, err)
+		log.Fatal().Err(err).Msgf("FATAL: Could not connect to NATS at %s", natsURL)
 	}
+	defer natsConn.Close()
+	log.Info().Msgf("Successfully connected to NATS at %s", natsConn.ConnectedUrl())
 
-	log.Printf("Listening on subject '%s' with queue group 'build-workers'", subject)
-
-	// Keep the process running
-	select {}
+	// --- Create and Run Application ---
+	app := platform.NewApp(log, natsConn)
+	app.Run()
 }

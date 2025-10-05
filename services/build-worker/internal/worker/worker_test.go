@@ -6,6 +6,7 @@ import (
 
 	"helios/pkg/events"
 	"github.com/nats-io/nats.go"
+	"github.com/rs/zerolog"
 )
 
 // --- Mocks ---
@@ -31,8 +32,9 @@ func (m *MockNatsPublisher) Publish(subject string, data []byte) error {
 
 func TestHandleDeploymentRequest(t *testing.T) {
 	// --- Setup ---
+	testLogger := zerolog.Nop()
 	mockNATS := &MockNatsPublisher{}
-	worker := NewWorker(mockNATS)
+	worker := NewWorker(mockNATS, testLogger)
 
 	// Create a sample deployment request event
 	request := events.DeploymentRequest{
