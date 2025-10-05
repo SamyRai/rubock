@@ -5,6 +5,8 @@ import (
 	"net/http"
 
 	"helios/pkg/events"
+
+	"github.com/go-playground/validator/v10"
 	"github.com/rs/zerolog"
 )
 
@@ -15,15 +17,17 @@ type NatsPublisher interface {
 
 // APIHandlers holds dependencies for the HTTP handlers.
 type APIHandlers struct {
-	NATS   NatsPublisher
-	Logger zerolog.Logger
+	NATS      NatsPublisher
+	Logger    zerolog.Logger
+	Validator *validator.Validate
 }
 
 // NewAPIHandlers creates a new APIHandlers struct.
 func NewAPIHandlers(nats NatsPublisher, logger zerolog.Logger) *APIHandlers {
 	return &APIHandlers{
-		NATS:   nats,
-		Logger: logger,
+		NATS:      nats,
+		Logger:    logger,
+		Validator: validator.New(),
 	}
 }
 
@@ -44,6 +48,13 @@ func (h *APIHandlers) CreateProjectHandler(w http.ResponseWriter, r *http.Reques
 	json.NewEncoder(w).Encode(response)
 }
 
+// CreateApplicationRequest defines the structure for the application creation request body.
+type CreateApplicationRequest struct {
+	Name          string `json:"name" validate:"required"`
+	GitRepository string `json:"git_repository" validate:"required,url"`
+	GitBranch     string `json:"git_branch" validate:"required"`
+}
+
 // CreateApplicationHandler simulates creating a new application and triggers a deployment.
 func (h *APIHandlers) CreateApplicationHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -51,15 +62,17 @@ func (h *APIHandlers) CreateApplicationHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	var reqBody struct {
-		Name          string `json:"name"`
-		GitRepository string `json:"git_repository"`
-		GitBranch     string `json:"git_branch"`
-	}
-
+	var reqBody CreateApplicationRequest
 	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
 		h.Logger.Warn().Err(err).Msg("Could not decode request body")
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate the request body
+	if err := h.Validator.Struct(&reqBody); err != nil {
+		h.Logger.Warn().Err(err).Msg("Request body validation failed")
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"helios/build-worker/internal/worker"
 	"helios/pkg/events"
@@ -32,25 +33,51 @@ func NewApp(logger zerolog.Logger, natsConn *nats.Conn) *App {
 func (a *App) Run() {
 	w := worker.NewWorker(a.NATS, a.Logger)
 
-	// Subscribe to deployment requests
+	// Create a synchronous queue subscriber for manual acknowledgement.
 	subject := events.SubjectDeploymentRequested
-	sub, err := a.NATS.QueueSubscribe(subject, "build-workers", w.HandleDeploymentRequest)
+	sub, err := a.NATS.QueueSubscribeSync(subject, "build-workers")
 	if err != nil {
-		a.Logger.Fatal().Err(err).Str("subject", subject).Msg("FATAL: Could not subscribe to NATS subject")
+		a.Logger.Fatal().Err(err).Str("subject", subject).Msg("FATAL: Could not create queue subscription")
 	}
 
 	a.Logger.Info().Str("subject", subject).Str("queue_group", "build-workers").Msg("Listening for events")
 
-	// Wait for interrupt signal to gracefully shut down the worker
+	// Start a goroutine for message processing.
+	processingDone := make(chan struct{})
+	go func() {
+		defer close(processingDone)
+		for {
+			msg, err := sub.NextMsg(10 * time.Second)
+			if err != nil {
+				// ErrTimeout is expected when no messages are pending.
+				if err == nats.ErrTimeout {
+					continue
+				}
+				// ErrConnectionClosed or ErrBadSubscription indicate the subscription is done.
+				if err == nats.ErrConnectionClosed || err == nats.ErrBadSubscription {
+					a.Logger.Info().Msg("Subscription closed, stopping message processing.")
+					return
+				}
+				a.Logger.Error().Err(err).Msg("Error receiving message from NATS")
+				continue
+			}
+			w.HandleDeploymentRequest(msg)
+		}
+	}()
+
+	// Wait for interrupt signal to gracefully shut down the worker.
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 	a.Logger.Warn().Msg("Shutdown signal received, draining NATS subscription...")
 
-	// Drain the subscription, processing any remaining messages.
+	// Drain the subscription. This will wait for the processing goroutine to finish.
 	if err := sub.Drain(); err != nil {
 		a.Logger.Error().Err(err).Msg("Error draining NATS subscription")
 	}
+
+	// Wait for the processing goroutine to exit cleanly.
+	<-processingDone
 
 	a.Logger.Info().Msg("Worker exiting")
 }
