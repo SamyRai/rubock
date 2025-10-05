@@ -15,7 +15,7 @@ This document tracks the major development tasks for the Helios project.
 
 ## Medium Priority
 
--   [ ] **Add README.md to All Services:** To improve project discoverability and maintainability, each service needs a `README.md` file.
-    -   [ ] `services/api`
-    -   [ ] `services/build-worker`
-    -   [ ] `services/oal-worker`
+-   [x] **Add README.md to All Services:** To improve project discoverability and maintainability, each service needs a `README.md` file.
+    -   [x] `services/api`
+    -   [x] `services/build-worker`
+    -   [x] `services/oal-worker`
