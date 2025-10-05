@@ -1,54 +1,96 @@
 package main
 
 import (
+	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	"helios/api/internal/platform"
+	"helios/pkg/bootstrap"
 	"helios/pkg/database"
 	"helios/pkg/logger"
 
-	"github.com/nats-io/nats.go"
+	"github.com/joho/godotenv"
+	"github.com/rs/zerolog"
 )
+
+// Config holds all configuration for the service.
+type Config struct {
+	DB database.DBConfig
+}
+
+// getenv returns the value of an environment variable or a fallback value.
+func getenv(key, fallback string) string {
+	if value, ok := os.LookupEnv(key); ok {
+		return value
+	}
+	return fallback
+}
+
+// loadConfig loads configuration from environment variables.
+func loadConfig(log zerolog.Logger) (*Config, error) {
+	dbPort, err := strconv.ParseUint(getenv("DB_PORT", "5432"), 10, 16)
+	if err != nil {
+		return nil, fmt.Errorf("invalid DB_PORT value: %w", err)
+	}
+
+	maxOpenConns, err := strconv.Atoi(getenv("DB_MAX_OPEN_CONNS", "25"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid DB_MAX_OPEN_CONNS value: %w", err)
+	}
+
+	maxIdleConns, err := strconv.Atoi(getenv("DB_MAX_IDLE_CONNS", "25"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid DB_MAX_IDLE_CONNS value: %w", err)
+	}
+
+	maxIdleTime, err := time.ParseDuration(getenv("DB_MAX_IDLE_TIME", "15m"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid DB_MAX_IDLE_TIME value: %w", err)
+	}
+
+	cfg := &Config{
+		DB: database.DBConfig{
+			User:         getenv("DB_USER", "user"),
+			Password:     getenv("DB_PASSWORD", "password"),
+			Host:         getenv("DB_HOST", "localhost"),
+			Port:         uint16(dbPort),
+			DBName:       getenv("DB_NAME", "helios"),
+			SSLMode:      getenv("DB_SSLMODE", "disable"),
+			MaxOpenConns: maxOpenConns,
+			MaxIdleConns: maxIdleConns,
+			MaxIdleTime:  maxIdleTime,
+		},
+	}
+
+	return cfg, nil
+}
 
 func main() {
 	// --- Initialize Dependencies ---
 	log := logger.New()
 
-	natsURL := os.Getenv("NATS_URL")
-	if natsURL == "" {
-		natsURL = nats.DefaultURL
+	// Load environment variables from .env file
+	if err := godotenv.Load(); err != nil {
+		log.Info().Msg("No .env file found, using environment variables")
 	}
 
-	var natsConn *nats.Conn
-	var err error
-	for i := 0; i < 5; i++ {
-		natsConn, err = nats.Connect(natsURL)
-		if err == nil {
-			break
-		}
-		log.Warn().Err(err).Msgf("Failed to connect to NATS, retrying in %d seconds...", i+1)
-		time.Sleep(time.Duration(i+1) * time.Second)
-	}
+	// Load configuration
+	cfg, err := loadConfig(log)
 	if err != nil {
-		log.Fatal().Err(err).Msgf("FATAL: Could not connect to NATS at %s", natsURL)
+		log.Fatal().Err(err).Msg("Failed to load configuration")
+	}
+
+	// Connect to NATS
+	natsConn, err := bootstrap.ConnectNATS(log)
+	if err != nil {
+		log.Fatal().Err(err).Msg("FATAL: Could not connect to NATS")
 	}
 	defer natsConn.Close()
-	log.Info().Msgf("Successfully connected to NATS at %s", natsConn.ConnectedUrl())
 
 	// Initialize database connection
-	dbCfg := database.DBConfig{
-		User:         "user",
-		Password:     "password",
-		Host:         "localhost",
-		Port:         5432,
-		DBName:       "helios",
-		SSLMode:      "disable",
-		MaxOpenConns: 25,
-		MaxIdleConns: 25,
-		MaxIdleTime:  15 * time.Minute,
-	}
-	db, err := database.NewDB(dbCfg)
+	db, err := database.NewDB(cfg.DB)
 	if err != nil {
 		log.Fatal().Err(err).Msg("FATAL: Could not connect to the database")
 	}
