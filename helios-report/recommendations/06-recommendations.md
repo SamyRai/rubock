@@ -56,9 +56,9 @@ This section synthesizes the findings from the deep-dive analysis into a priorit
 -   **Action:** Update NATS subjects to include a version number.
 -   **Implementation:** Change subjects in `pkg/events` from `"deployment.requested"` to `"v1.deployment.requested"`. This allows for backward-compatible evolution of event schemas.
 
-### 10. Migrate to the `pgx` PostgreSQL Driver (Dependencies)
--   **Action:** Replace the `lib/pq` driver with `jackc/pgx` in the `pkg/database` package.
--   **Implementation:** Update the `go.mod` file and change the driver name in the `sql.Open` call. The `pgx` driver is more actively maintained and offers better performance.
+### 10. COMPLETED: Migrate to the `pgx` PostgreSQL Driver (Dependencies)
+-   **Action:** The `lib/pq` driver has been replaced with `jackc/pgx` in the `pkg/database` package.
+-   **Implementation:** The `go.mod` file and the `sql.Open` call have been updated. This task is complete.
 
 ### 11. Centralize and Standardize Configuration (Code Quality)
 -   **Action:** Load all configuration for each service at startup in `main.go`.
